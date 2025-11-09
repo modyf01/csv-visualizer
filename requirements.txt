@@ -1,0 +1,4 @@
+pandas
+PySide6
+matplotlib
+

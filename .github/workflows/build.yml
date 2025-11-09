@@ -1,0 +1,264 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-13, macos-14]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.ico main.py
+          elif [[ "${{ matrix.os }}" == macos-* ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=11.0
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.icns main.py
+          else
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.png \
+              --hidden-import matplotlib.backends.backend_qtagg \
+              --hidden-import matplotlib.backends.backend_agg \
+              --hidden-import PySide6.QtGui \
+              --hidden-import PySide6.QtWidgets \
+              --hidden-import PySide6.QtCore \
+              main.py
+          fi
+        shell: bash
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: csv-visualizer-${{ matrix.os }}
+          path: dist/*
+
+      - name: Install fpm (deb build deps)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev build-essential desktop-file-utils
+          sudo gem install --no-document fpm
+
+      - name: Build deb (with icon and desktop file)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          mkdir -p pkg/usr/local/bin
+          mkdir -p pkg/usr/share/applications
+          mkdir -p pkg/usr/share/pixmaps
+
+          cp dist/csv-visualizer pkg/usr/local/bin/csv-visualizer
+          cp packaging/csv-visualizer.desktop pkg/usr/share/applications/csv-visualizer.desktop
+          cp packaging/icon.png pkg/usr/share/pixmaps/csv-visualizer.png
+
+          cat > after-install.sh << 'SH'
+          #!/bin/sh
+          set -e
+          if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database || true; fi
+          if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -f /usr/share/icons/hicolor || true; fi
+          exit 0
+          SH
+          chmod +x after-install.sh
+
+          fpm -s dir -t deb -n csv-visualizer -v 0.1.0 \
+            --description "CSV visualizer written in Python/PySide6" \
+            --depends 'libxkbcommon-x11-0' \
+            --depends 'libxcb1' \
+            --depends 'libxcb-xinerama0' \
+            --depends 'libxcb-cursor0' \
+            --depends 'libxcb-render0' \
+            --depends 'libxcb-shape0' \
+            --depends 'libxcb-xfixes0' \
+            --depends 'libxcb-icccm4' \
+            --depends 'libxcb-image0' \
+            --depends 'libxcb-keysyms1' \
+            --depends 'libegl1' \
+            --after-install after-install.sh \
+            -C pkg .
+
+      - name: Upload deb
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: csv-visualizer-deb
+          path: ./*.deb
+
+  publish:
+    name: Publish release & update README
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -maxdepth 3 -print
+
+      - name: Remove previous 'latest' release if exists
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = 'latest';
+            // Find existing release by tag
+            let release = null;
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag
+              });
+              release = data;
+            } catch (e) {
+              // doesn't exist, ignore
+            }
+            if (release) {
+              // delete release
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id
+              });
+              // delete tag
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: 'tags/' + tag
+                });
+              } catch (e) {}
+            }
+
+      - name: Create new 'latest' release
+        id: create_release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = 'latest';
+            const { data: rel } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: 'Latest builds',
+              body: 'Automated latest build artifacts.',
+              draft: false,
+              prerelease: true
+            });
+            core.setOutput('upload_url', rel.upload_url);
+            core.setOutput('html_url', rel.html_url);
+          result-encoding: string
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          
+          # Rename files to be unique based on platform
+          mv artifacts/csv-visualizer-ubuntu-22.04/csv-visualizer artifacts/csv-visualizer-ubuntu-22.04/csv-visualizer-linux
+          mv artifacts/csv-visualizer-windows-latest/csv-visualizer.exe artifacts/csv-visualizer-windows-latest/csv-visualizer-windows.exe
+          mv artifacts/csv-visualizer-macos-13/csv-visualizer artifacts/csv-visualizer-macos-13/csv-visualizer-macos-intel
+          mv artifacts/csv-visualizer-macos-14/csv-visualizer artifacts/csv-visualizer-macos-14/csv-visualizer-macos-arm64
+          
+          # Upload all files
+          upload() {
+            local file="$1"
+            local name
+            name="$(basename "$file")"
+            echo "Uploading $name"
+            gh release upload latest "$file" --clobber
+          }
+          find artifacts -type f -maxdepth 3 -print | while read -r f; do upload "$f"; done
+
+      - name: Generate README builds section
+        id: gen
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: rel } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: 'latest' });
+            const assets = rel.assets.map(a => ({
+              name: a.name,
+              url: a.browser_download_url
+            }));
+
+            // Group by OS heuristically
+            function row(os, label) {
+              const picks = assets.filter(a =>
+                a.name.toLowerCase().includes(os));
+              if (picks.length === 0) return `- **${label || os}**: _no build_`;
+              const links = picks.map(p => `[\`${p.name}\`](${p.url})`).join(' • ');
+              return `- **${label || os}**: ${links}`;
+            }
+
+            const lines = [];
+            lines.push(`**Release:** [latest](${rel.html_url})`);
+            lines.push('');
+            lines.push(row('linux', 'Linux (binary)'));
+            lines.push(row('deb', 'Linux (.deb package)'));
+            lines.push(row('windows', 'Windows'));
+            lines.push(row('macos-intel', 'macOS Intel (x86_64)'));
+            lines.push(row('macos-arm64', 'macOS Apple Silicon (arm64)'));
+            const md = lines.join('\n');
+
+            core.setOutput('markdown', md);
+
+      - name: Update README in-place
+        run: |
+          # Save markdown to file to avoid bash escaping issues
+          cat > builds.txt << 'EOF'
+          ${{ steps.gen.outputs.markdown }}
+          EOF
+          
+          # Update README between markers
+          awk '
+            /<!-- BUILDS:START -->/ {
+              print
+              while ((getline line < "builds.txt") > 0) print line
+              close("builds.txt")
+              skip=1
+              next
+            }
+            /<!-- BUILDS:END -->/ { print; skip=0; next }
+            !skip { print }
+          ' README.md > README.tmp
+          
+          mv README.tmp README.md
+          rm -f builds.txt
+
+      - name: Commit README changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: update README latest builds [skip ci]"
+          file_pattern: README.md
+

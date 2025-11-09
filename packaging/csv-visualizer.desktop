@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CSV Visualizer
+Exec=/usr/local/bin/csv-visualizer %f
+Icon=csv-visualizer
+MimeType=text/csv;
+Categories=Utility;
+Terminal=false
+
