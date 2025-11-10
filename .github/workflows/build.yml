@@ -176,6 +176,7 @@ jobs:
             });
             core.setOutput('upload_url', rel.upload_url);
             core.setOutput('html_url', rel.html_url);
+            core.setOutput('id', String(rel.id));
           result-encoding: string
 
       - name: Upload assets to release
@@ -203,10 +204,14 @@ jobs:
       - name: Generate README builds section
         id: gen
         uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ steps.create_release.outputs.id }}
         with:
           script: |
             const { owner, repo } = context.repo;
-            const { data: rel } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: 'latest' });
+            // Fetch by release ID to avoid occasional 404s when resolving by tag
+            const releaseId = Number(process.env.RELEASE_ID);
+            const { data: rel } = await github.rest.repos.getRelease({ owner, repo, release_id: releaseId });
             const assets = rel.assets.map(a => ({
               name: a.name,
               url: a.browser_download_url
