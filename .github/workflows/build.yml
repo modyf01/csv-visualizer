@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-13, macos-14]
+        os: [ubuntu-22.04, windows-latest, macos-14]
 
     steps:
       - name: Checkout
@@ -188,7 +188,6 @@ jobs:
           # Rename files to be unique based on platform
           mv artifacts/csv-visualizer-ubuntu-22.04/csv-visualizer artifacts/csv-visualizer-ubuntu-22.04/csv-visualizer-linux
           mv artifacts/csv-visualizer-windows-latest/csv-visualizer.exe artifacts/csv-visualizer-windows-latest/csv-visualizer-windows.exe
-          mv artifacts/csv-visualizer-macos-13/csv-visualizer artifacts/csv-visualizer-macos-13/csv-visualizer-macos-intel
           mv artifacts/csv-visualizer-macos-14/csv-visualizer artifacts/csv-visualizer-macos-14/csv-visualizer-macos-arm64
           
           # Upload all files
