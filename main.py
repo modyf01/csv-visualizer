@@ -48,6 +48,7 @@ class PlotCanvas(FigureCanvas):
         point_value,
         bg_color_map=None,
         show_bg_legend=False,
+        show_series_legend=True,
     ):
         self.ax.clear()
         x = df.index.values
@@ -65,7 +66,8 @@ class PlotCanvas(FigureCanvas):
             point_vals = df[point_col].astype(str).values
             self._draw_point_markers(point_vals, point_value)
 
-        if value_cols:
+        leg1 = None
+        if show_series_legend and value_cols:
             leg1 = self.ax.legend(loc="upper right", fontsize=8, frameon=True)
             leg1.get_frame().set_alpha(0.85)
 
@@ -81,7 +83,7 @@ class PlotCanvas(FigureCanvas):
                 bbox_to_anchor=(0.0, 1.0),
                 borderaxespad=1.0,
             )
-            if value_cols:
+            if leg1 is not None:
                 self.ax.add_artist(leg1)
 
         self.ax.set_xlabel("index")
@@ -252,6 +254,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.total_chunks = 1
         self.current_chunk = 0
         self.col_unique_cache: dict[str, list[str] | None] = {}
+        self._show_series_legend = True
+        self._show_bg_legend = True
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -401,6 +405,20 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addAction(open_action)
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+
+        settings_menu = menubar.addMenu("&Settings")
+        self.series_legend_action = QAction("Show series legend", self)
+        self.series_legend_action.setCheckable(True)
+        self.series_legend_action.setChecked(self._show_series_legend)
+        self.series_legend_action.triggered.connect(self._on_toggle_series_legend)
+        settings_menu.addAction(self.series_legend_action)
+
+        self.bg_legend_action = QAction("Show background legend", self)
+        self.bg_legend_action.setCheckable(True)
+        self.bg_legend_action.setChecked(self._show_bg_legend)
+        self.bg_legend_action.triggered.connect(self._on_toggle_bg_legend)
+        settings_menu.addAction(self.bg_legend_action)
+
         view_menu = menubar.addMenu("&View")
         view_menu.addAction(self.toggle_compact_action)
 
@@ -750,15 +768,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     point_val = None
 
         bg_color_map = None
-        show_bg_legend = False
         if cat_col is not None:
             uniqs = self.col_unique_cache.get(cat_col)
             if uniqs is not None:
                 filtered = [u for u in uniqs if (no_bg_val is None or u != no_bg_val)]
                 palette = generate_palette(len(filtered))
                 bg_color_map = {v: palette[i] for i, v in enumerate(filtered)}
-                if len(filtered) <= 5:
-                    show_bg_legend = True
 
         self.canvas.plot_data_with_background(
             df_slice,
@@ -768,7 +783,8 @@ class MainWindow(QtWidgets.QMainWindow):
             point_col=point_col,
             point_value=point_val,
             bg_color_map=bg_color_map,
-            show_bg_legend=show_bg_legend,
+            show_bg_legend=self._show_bg_legend,
+            show_series_legend=self._show_series_legend,
         )
 
     def _update_edit_mode(self):
@@ -858,6 +874,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_selection()
         
         self.statusBar().showMessage(f"Updated rows {start_idx} to {end_idx} with value '{new_value}'")
+
+    def _on_toggle_series_legend(self, checked: bool):
+        self._show_series_legend = checked
+        self.redraw_plot()
+
+    def _on_toggle_bg_legend(self, checked: bool):
+        self._show_bg_legend = checked
+        self.redraw_plot()
 
     def toggle_compact_mode(self):
         self._compact = not self._compact
