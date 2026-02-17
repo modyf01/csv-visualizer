@@ -164,19 +164,24 @@ class PlotCanvas(FigureCanvas):
         ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
         self.draw_idle()
 
+    def _create_span_selector(self):
+        return SpanSelector(
+            self.ax,
+            self._on_select,
+            'horizontal',
+            useblit=True,
+            props=dict(alpha=0.3, facecolor='red'),
+            interactive=True,
+            drag_from_anywhere=True,
+            button=3
+        )
+
     def enable_selection_mode(self, enabled: bool):
-        if enabled and self._span_selector is None:
-            self._span_selector = SpanSelector(
-                self.ax,
-                self._on_select,
-                'horizontal',
-                useblit=True,
-                props=dict(alpha=0.3, facecolor='red'),
-                interactive=True,
-                drag_from_anywhere=True,
-                button=3
-            )
-        elif not enabled and self._span_selector is not None:
+        if enabled:
+            if self._span_selector is not None:
+                self._span_selector.set_active(False)
+            self._span_selector = self._create_span_selector()
+        elif self._span_selector is not None:
             self._span_selector.set_active(False)
             self._span_selector = None
             self.draw_idle()
@@ -190,17 +195,7 @@ class PlotCanvas(FigureCanvas):
     def clear_selection(self):
         if self._span_selector is not None:
             self._span_selector.set_active(False)
-            self._span_selector = None
-            self._span_selector = SpanSelector(
-                self.ax,
-                self._on_select,
-                'horizontal',
-                useblit=True,
-                props=dict(alpha=0.3, facecolor='red'),
-                interactive=True,
-                drag_from_anywhere=True,
-                button=3
-            )
+            self._span_selector = self._create_span_selector()
             self.draw_idle()
 
 
@@ -786,6 +781,12 @@ class MainWindow(QtWidgets.QMainWindow):
             show_bg_legend=self._show_bg_legend,
             show_series_legend=self._show_series_legend,
         )
+        self._refresh_span_selector()
+
+    def _refresh_span_selector(self):
+        cat_col = self.cat_col_combo.currentText()
+        has_cat_col = (cat_col != "— none —" and self.df is not None and cat_col in self.df.columns)
+        self.canvas.enable_selection_mode(has_cat_col)
 
     def _update_edit_mode(self):
         cat_col = self.cat_col_combo.currentText()
