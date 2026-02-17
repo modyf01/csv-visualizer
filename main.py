@@ -31,6 +31,7 @@ class PlotCanvas(FigureCanvas):
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.toggle_compact_callback = toggle_compact_callback
         self.selection_callback = selection_callback
         self._press_event = None
