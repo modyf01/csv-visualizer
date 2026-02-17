@@ -822,6 +822,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chunk_offset = self.current_chunk * self.CHUNK_SIZE
             actual_start = chunk_offset + start_idx
             actual_end = chunk_offset + end_idx
+
         
         self.selected_range = (actual_start, actual_end)
         self.selection_label.setText(f"Selected: rows {actual_start} to {actual_end} ({actual_end - actual_start + 1} rows)")
