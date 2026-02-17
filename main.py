@@ -1,5 +1,7 @@
 import sys
 import math
+import matplotlib
+matplotlib.use("QtAgg")
 import pandas as pd
 
 from PySide6 import QtWidgets, QtCore, QtGui

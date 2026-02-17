@@ -32,8 +32,10 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
+        env:
+          MPLBACKEND: QtAgg
         run: |
-          HIDDEN_IMPORTS=(
+          COMMON_OPTS=(
             --hidden-import matplotlib.backends.backend_qtagg
             --hidden-import matplotlib.backends.backend_qt
             --hidden-import matplotlib.backends.backend_agg
@@ -42,17 +44,19 @@ jobs:
             --hidden-import PySide6.QtGui
             --hidden-import PySide6.QtWidgets
             --hidden-import PySide6.QtCore
+            --exclude-module tkinter
+            --exclude-module _tkinter
           )
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.ico \
-              "${HIDDEN_IMPORTS[@]}" main.py
+              "${COMMON_OPTS[@]}" main.py
           elif [[ "${{ matrix.os }}" == macos-* ]]; then
             export MACOSX_DEPLOYMENT_TARGET=11.0
             pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.icns \
-              "${HIDDEN_IMPORTS[@]}" main.py
+              "${COMMON_OPTS[@]}" main.py
           else
             pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.png \
-              "${HIDDEN_IMPORTS[@]}" main.py
+              "${COMMON_OPTS[@]}" main.py
           fi
         shell: bash
 
