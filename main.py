@@ -165,16 +165,29 @@ class PlotCanvas(FigureCanvas):
         self.draw_idle()
 
     def _create_span_selector(self):
-        return SpanSelector(
-            self.ax,
-            self._on_select,
-            'horizontal',
-            useblit=True,
-            props=dict(alpha=0.3, facecolor='red'),
-            interactive=True,
-            drag_from_anywhere=True,
-            button=3
-        )
+        try:
+            sel = SpanSelector(
+                self.ax,
+                self._on_select,
+                'horizontal',
+                useblit=True,
+                props=dict(alpha=0.3, facecolor='red'),
+                interactive=True,
+                drag_from_anywhere=True,
+                button=3
+            )
+            return sel
+        except Exception:
+            return SpanSelector(
+                self.ax,
+                self._on_select,
+                'horizontal',
+                useblit=False,
+                props=dict(alpha=0.3, facecolor='red'),
+                interactive=True,
+                drag_from_anywhere=True,
+                button=3
+            )
 
     def enable_selection_mode(self, enabled: bool):
         if enabled:

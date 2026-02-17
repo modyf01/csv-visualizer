@@ -33,19 +33,26 @@ jobs:
 
       - name: Build executable
         run: |
+          HIDDEN_IMPORTS=(
+            --hidden-import matplotlib.backends.backend_qtagg
+            --hidden-import matplotlib.backends.backend_qt
+            --hidden-import matplotlib.backends.backend_agg
+            --hidden-import matplotlib.backends._backend_agg
+            --hidden-import matplotlib.widgets
+            --hidden-import PySide6.QtGui
+            --hidden-import PySide6.QtWidgets
+            --hidden-import PySide6.QtCore
+          )
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.ico main.py
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.ico \
+              "${HIDDEN_IMPORTS[@]}" main.py
           elif [[ "${{ matrix.os }}" == macos-* ]]; then
             export MACOSX_DEPLOYMENT_TARGET=11.0
-            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.icns main.py
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.icns \
+              "${HIDDEN_IMPORTS[@]}" main.py
           else
             pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.png \
-              --hidden-import matplotlib.backends.backend_qtagg \
-              --hidden-import matplotlib.backends.backend_agg \
-              --hidden-import PySide6.QtGui \
-              --hidden-import PySide6.QtWidgets \
-              --hidden-import PySide6.QtCore \
-              main.py
+              "${HIDDEN_IMPORTS[@]}" main.py
           fi
         shell: bash
 
@@ -261,8 +268,16 @@ jobs:
           rm -f builds.txt
 
       - name: Commit README changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "docs: update README latest builds [skip ci]"
-          file_pattern: README.md
+        run: |
+          git fetch origin master
+          git rebase origin/master
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "No README changes to commit"
+          else
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit -m "docs: update README latest builds [skip ci]"
+            git push origin HEAD:master
+          fi
 
