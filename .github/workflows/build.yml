@@ -177,7 +177,7 @@ jobs:
             $FILES
 
           # Save release URL for README
-          RELEASE_URL=$(gh release view latest --json htmlUrl -q '.htmlUrl')
+          RELEASE_URL=$(gh release view latest --json url -q '.url')
           echo "release_url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
 
       - name: Generate README builds section
