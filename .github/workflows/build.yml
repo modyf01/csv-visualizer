@@ -219,15 +219,25 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            // Fetch by release ID to avoid occasional 404s when resolving by tag
             const releaseId = Number(process.env.RELEASE_ID);
-            const { data: rel } = await github.rest.repos.getRelease({ owner, repo, release_id: releaseId });
+
+            // Retry until assets are available (race condition with upload)
+            let rel;
+            for (let attempt = 0; attempt < 10; attempt++) {
+              const { data } = await github.rest.repos.getRelease({ owner, repo, release_id: releaseId });
+              rel = data;
+              if (rel.assets.length >= 4) break;
+              core.info(`Attempt ${attempt + 1}: found ${rel.assets.length} assets, waiting...`);
+              await new Promise(r => setTimeout(r, 3000));
+            }
+
             const assets = rel.assets.map(a => ({
               name: a.name,
               url: a.browser_download_url
             }));
+            core.info(`Final asset count: ${assets.length}`);
+            assets.forEach(a => core.info(`  - ${a.name}`));
 
-            // Group by OS heuristically
             function row(os, label) {
               const picks = assets.filter(a =>
                 a.name.toLowerCase().includes(os));
@@ -273,15 +283,14 @@ jobs:
 
       - name: Commit README changes
         run: |
-          git fetch origin master
-          git rebase origin/master
           git add README.md
           if git diff --cached --quiet; then
             echo "No README changes to commit"
-          else
-            git -c user.name="github-actions[bot]" \
-                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-                commit -m "docs: update README latest builds [skip ci]"
-            git push origin HEAD:master
+            exit 0
           fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "docs: update README latest builds [skip ci]"
+          git pull --rebase origin master
+          git push origin HEAD:master
 
