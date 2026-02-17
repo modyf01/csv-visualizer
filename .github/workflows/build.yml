@@ -49,7 +49,6 @@ jobs:
             --hidden-import matplotlib.backends.backend_qt
             --hidden-import matplotlib.backends.backend_agg
             --hidden-import matplotlib.backends._backend_agg
-            --hidden-import matplotlib.widgets
             --hidden-import PySide6.QtGui
             --hidden-import PySide6.QtWidgets
             --hidden-import PySide6.QtCore

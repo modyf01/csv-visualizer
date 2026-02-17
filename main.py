@@ -11,7 +11,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
-from matplotlib.widgets import SpanSelector
 
 
 def generate_palette(n: int):
@@ -35,7 +34,9 @@ class PlotCanvas(FigureCanvas):
         self.toggle_compact_callback = toggle_compact_callback
         self.selection_callback = selection_callback
         self._press_event = None
-        self._span_selector = None
+        self._selection_enabled = False
+        self._sel_start = None
+        self._sel_patch = None
         self.mpl_connect("scroll_event", self.on_scroll)
         self.mpl_connect("button_press_event", self.on_button_press)
         self.mpl_connect("button_release_event", self.on_button_release)
@@ -147,13 +148,38 @@ class PlotCanvas(FigureCanvas):
         if getattr(event, "dblclick", False) and callable(self.toggle_compact_callback):
             self.toggle_compact_callback()
             return
+        if event.button == 3 and self._selection_enabled and event.inaxes == self.ax:
+            self._sel_start = event.xdata
+            self._remove_sel_patch()
+            return
         if event.button in [1, 2]:
             self._press_event = event
 
     def on_button_release(self, event):
+        if event.button == 3 and self._sel_start is not None:
+            if event.xdata is not None:
+                xmin = min(self._sel_start, event.xdata)
+                xmax = max(self._sel_start, event.xdata)
+                if xmax - xmin > 0.5 and self.selection_callback:
+                    self.selection_callback(int(round(xmin)), int(round(xmax)))
+                else:
+                    self._remove_sel_patch()
+                    self.draw_idle()
+            else:
+                self._remove_sel_patch()
+                self.draw_idle()
+            self._sel_start = None
+            return
         self._press_event = None
 
     def on_mouse_move(self, event):
+        if self._sel_start is not None and event.xdata is not None:
+            self._remove_sel_patch()
+            xmin = min(self._sel_start, event.xdata)
+            xmax = max(self._sel_start, event.xdata)
+            self._sel_patch = self.ax.axvspan(xmin, xmax, alpha=0.3, facecolor='red', zorder=10)
+            self.draw_idle()
+            return
         if self._press_event is None:
             return
         if event.xdata is None or event.ydata is None:
@@ -167,52 +193,25 @@ class PlotCanvas(FigureCanvas):
         ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
         self.draw_idle()
 
-    def _create_span_selector(self):
-        try:
-            sel = SpanSelector(
-                self.ax,
-                self._on_select,
-                'horizontal',
-                useblit=True,
-                props=dict(alpha=0.3, facecolor='red'),
-                interactive=True,
-                drag_from_anywhere=True,
-                button=3
-            )
-            return sel
-        except Exception:
-            return SpanSelector(
-                self.ax,
-                self._on_select,
-                'horizontal',
-                useblit=False,
-                props=dict(alpha=0.3, facecolor='red'),
-                interactive=True,
-                drag_from_anywhere=True,
-                button=3
-            )
+    def _remove_sel_patch(self):
+        if self._sel_patch is not None:
+            try:
+                self._sel_patch.remove()
+            except (ValueError, AttributeError):
+                pass
+            self._sel_patch = None
 
     def enable_selection_mode(self, enabled: bool):
-        if enabled:
-            if self._span_selector is not None:
-                self._span_selector.set_active(False)
-            self._span_selector = self._create_span_selector()
-        elif self._span_selector is not None:
-            self._span_selector.set_active(False)
-            self._span_selector = None
+        self._selection_enabled = enabled
+        if not enabled:
+            self._sel_start = None
+            self._remove_sel_patch()
             self.draw_idle()
 
-    def _on_select(self, xmin, xmax):
-        if self.selection_callback:
-            start_idx = int(round(xmin))
-            end_idx = int(round(xmax))
-            self.selection_callback(start_idx, end_idx)
-    
     def clear_selection(self):
-        if self._span_selector is not None:
-            self._span_selector.set_active(False)
-            self._span_selector = self._create_span_selector()
-            self.draw_idle()
+        self._sel_start = None
+        self._remove_sel_patch()
+        self.draw_idle()
 
 
 class PandasModel(QtCore.QAbstractTableModel):
