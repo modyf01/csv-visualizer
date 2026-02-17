@@ -20,13 +20,13 @@ CSV visualizer with support for continuous data, categorical backgrounds, and ve
 ## Latest builds
 
 <!-- BUILDS:START -->
-**Release:** [latest](https://github.com/modyf01/csv-visualizer/releases/tag/untagged-a3fc62d885cbca320712)
+**Release:** [latest](https://github.com/modyf01/csv-visualizer/releases/tag/latest)
 
-- **Linux (binary)**: _no build_
-- **Linux (.deb package)**: _no build_
-- **Windows**: _no build_
+- **Linux (binary)**: [`csv-visualizer-linux`](https://github.com/modyf01/csv-visualizer/releases/download/latest/csv-visualizer-linux)
+- **Linux (.deb package)**: [`csv-visualizer_0.1.0_amd64.deb`](https://github.com/modyf01/csv-visualizer/releases/download/latest/csv-visualizer_0.1.0_amd64.deb)
+- **Windows**: [`csv-visualizer-windows.exe`](https://github.com/modyf01/csv-visualizer/releases/download/latest/csv-visualizer-windows.exe)
 - **macOS Intel (x86_64)**: _no build_
-- **macOS Apple Silicon (arm64)**: _no build_
+- **macOS Apple Silicon (arm64)**: [`csv-visualizer-macos-arm64`](https://github.com/modyf01/csv-visualizer/releases/download/latest/csv-visualizer-macos-arm64)
 <!-- BUILDS:END -->
 
 ## Installation
