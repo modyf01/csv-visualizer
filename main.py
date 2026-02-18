@@ -528,6 +528,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
 
     def _calc_unique_values_up_to_30(self, series: pd.Series) -> list[str] | None:
+        series = series.dropna()
         n = len(series)
         if n == 0:
             return []
