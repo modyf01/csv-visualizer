@@ -65,7 +65,12 @@ class PlotCanvas(FigureCanvas):
 
         if cat_col is not None and cat_col in df.columns and bg_color_map:
             cat_vals = df[cat_col].astype(str).values
+            log.debug("plot_data_with_background: drawing bg, cat_col=%s, unique cat_vals=%s",
+                      cat_col, list(set(cat_vals[:50])))
             self._draw_category_background(cat_vals, no_bg_value, bg_color_map)
+        else:
+            log.debug("plot_data_with_background: NO background drawn (cat_col=%s, bg_color_map=%s)",
+                      cat_col, bg_color_map is not None)
 
         for col in value_cols:
             if col in df.columns:
@@ -794,6 +799,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 palette = generate_palette(len(filtered))
                 bg_color_map = {v: palette[i] for i, v in enumerate(filtered)}
 
+        log.debug("redraw_plot: cat_col=%s, no_bg_val=%s, bg_color_map keys=%s, df_slice len=%d",
+                  cat_col, no_bg_val, list(bg_color_map.keys()) if bg_color_map else None, len(df_slice))
+
         self.canvas.plot_data_with_background(
             df_slice,
             value_cols=value_cols,
@@ -805,6 +813,7 @@ class MainWindow(QtWidgets.QMainWindow):
             show_bg_legend=self._show_bg_legend,
             show_series_legend=self._show_series_legend,
         )
+        log.debug("redraw_plot: plot_data_with_background done")
 
     def _update_edit_mode(self):
         cat_col = self.cat_col_combo.currentText()
@@ -854,50 +863,67 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.df is None or self.selected_range is None:
             log.debug("apply_edit_to_selection: early return (no df or no range)")
             return
-        
-        cat_col = self.cat_col_combo.currentText()
-        if cat_col == "— none —" or cat_col not in self.df.columns:
-            QtWidgets.QMessageBox.warning(self, "No Category Column", "Please select a category column first.")
-            return
-        
-        new_value = self.edit_value_combo.currentText().strip()
-        if not new_value:
-            QtWidgets.QMessageBox.warning(self, "No Value", "Please enter or select a value to assign.")
-            return
-        
-        start_idx, end_idx = self.selected_range
-        
-        self.df.loc[start_idx:end_idx, cat_col] = new_value
-        
-        self._mark_as_modified()
-        
-        uniqs = self._calc_unique_values_up_to_30(self.df[cat_col])
-        self.col_unique_cache[cat_col] = uniqs
-        
-        if uniqs is not None:
-            current_text = self.edit_value_combo.currentText()
-            self.edit_value_combo.clear()
-            self.edit_value_combo.addItems(sorted(uniqs))
-            idx = self.edit_value_combo.findText(current_text)
-            if idx >= 0:
-                self.edit_value_combo.setCurrentIndex(idx)
-        
-        model = PandasModel(self.df)
-        self.table_view.setModel(model)
-        self.table_view.resizeColumnsToContents()
-        
-        xlim = self.canvas.ax.get_xlim()
-        ylim = self.canvas.ax.get_ylim()
-        
-        self.redraw_plot()
-        
-        self.canvas.ax.set_xlim(xlim)
-        self.canvas.ax.set_ylim(ylim)
-        self.canvas.draw_idle()
-        
-        self._clear_selection()
-        
-        self.statusBar().showMessage(f"Updated rows {start_idx} to {end_idx} with value '{new_value}'")
+
+        try:
+            cat_col = self.cat_col_combo.currentText()
+            if cat_col == "— none —" or cat_col not in self.df.columns:
+                QtWidgets.QMessageBox.warning(self, "No Category Column", "Please select a category column first.")
+                return
+
+            new_value = self.edit_value_combo.currentText().strip()
+            if not new_value:
+                QtWidgets.QMessageBox.warning(self, "No Value", "Please enter or select a value to assign.")
+                return
+
+            start_idx, end_idx = self.selected_range
+            log.debug("apply: cat_col=%s, new_value=%s, range=%d..%d", cat_col, new_value, start_idx, end_idx)
+
+            old_vals = self.df.loc[start_idx:end_idx, cat_col].unique().tolist()
+            log.debug("apply: old unique values in range: %s", old_vals)
+
+            self.df.loc[start_idx:end_idx, cat_col] = new_value
+
+            verify = self.df.loc[start_idx:end_idx, cat_col].unique().tolist()
+            log.debug("apply: after assignment, unique values in range: %s", verify)
+
+            self._mark_as_modified()
+
+            uniqs = self._calc_unique_values_up_to_30(self.df[cat_col])
+            self.col_unique_cache[cat_col] = uniqs
+            log.debug("apply: uniqs cache updated: %s", uniqs)
+
+            if uniqs is not None:
+                current_text = self.edit_value_combo.currentText()
+                self.edit_value_combo.clear()
+                self.edit_value_combo.addItems(sorted(uniqs))
+                idx = self.edit_value_combo.findText(current_text)
+                if idx >= 0:
+                    self.edit_value_combo.setCurrentIndex(idx)
+
+            model = PandasModel(self.df)
+            self.table_view.setModel(model)
+            self.table_view.resizeColumnsToContents()
+            log.debug("apply: table model updated")
+
+            xlim = self.canvas.ax.get_xlim()
+            ylim = self.canvas.ax.get_ylim()
+            log.debug("apply: saved xlim=%s, ylim=%s", xlim, ylim)
+
+            self.redraw_plot()
+            log.debug("apply: redraw_plot() done")
+
+            self.canvas.ax.set_xlim(xlim)
+            self.canvas.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+            log.debug("apply: draw_idle() done")
+
+            self._clear_selection()
+            log.debug("apply: selection cleared")
+
+            self.statusBar().showMessage(f"Updated rows {start_idx} to {end_idx} with value '{new_value}'")
+            log.debug("apply: COMPLETE OK")
+        except Exception:
+            log.exception("apply_edit_to_selection CRASHED")
 
     def _on_toggle_series_legend(self, checked: bool):
         self._show_series_legend = checked
