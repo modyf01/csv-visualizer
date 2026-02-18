@@ -1,6 +1,16 @@
 import sys
 import math
+import logging
+import os
 import pandas as pd
+
+_log_path = os.path.join(os.path.expanduser("~"), "csv-visualizer-debug.log")
+logging.basicConfig(
+    filename=_log_path,
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger("csvviz")
 
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtGui import QAction, QShortcut
@@ -141,6 +151,8 @@ class PlotCanvas(FigureCanvas):
         return new_left, new_right
 
     def on_button_press(self, event):
+        log.debug("on_button_press: button=%s, dblclick=%s, inaxes=%s, x=%s",
+                  event.button, getattr(event, "dblclick", False), event.inaxes, event.xdata)
         if getattr(event, "dblclick", False) and callable(self.toggle_compact_callback):
             self.toggle_compact_callback()
             return
@@ -148,6 +160,7 @@ class PlotCanvas(FigureCanvas):
             self._press_event = event
 
     def on_button_release(self, event):
+        log.debug("on_button_release: button=%s, x=%s", event.button, event.xdata)
         self._press_event = None
 
     def on_mouse_move(self, event):
@@ -165,23 +178,29 @@ class PlotCanvas(FigureCanvas):
         self.draw_idle()
 
     def enable_selection_mode(self, enabled: bool):
+        log.debug("enable_selection_mode(%s), current selector=%s", enabled, self._span_selector)
         if enabled and self._span_selector is None:
-            self._span_selector = SpanSelector(
-                self.ax,
-                self._on_select,
-                'horizontal',
-                useblit=True,
-                props=dict(alpha=0.3, facecolor='red'),
-                interactive=True,
-                drag_from_anywhere=True,
-                button=3
-            )
+            try:
+                self._span_selector = SpanSelector(
+                    self.ax,
+                    self._on_select,
+                    'horizontal',
+                    useblit=True,
+                    props=dict(alpha=0.3, facecolor='red'),
+                    interactive=True,
+                    drag_from_anywhere=True,
+                    button=3
+                )
+                log.debug("SpanSelector created OK: %s", self._span_selector)
+            except Exception:
+                log.exception("SpanSelector creation FAILED")
         elif not enabled and self._span_selector is not None:
             self._span_selector.set_active(False)
             self._span_selector = None
             self.draw_idle()
 
     def _on_select(self, xmin, xmax):
+        log.debug("_on_select called: xmin=%s, xmax=%s", xmin, xmax)
         if self.selection_callback:
             start_idx = int(round(xmin))
             end_idx = int(round(xmax))
@@ -805,6 +824,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.edit_value_combo.setEnabled(False)
 
     def on_range_selected(self, start_idx: int, end_idx: int):
+        log.debug("on_range_selected: start=%s, end=%s", start_idx, end_idx)
         if start_idx > end_idx:
             start_idx, end_idx = end_idx, start_idx
         
@@ -829,7 +849,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.edit_value_combo.setEnabled(True)
 
     def apply_edit_to_selection(self):
+        log.debug("apply_edit_to_selection: selected_range=%s, df=%s",
+                  self.selected_range, self.df is not None)
         if self.df is None or self.selected_range is None:
+            log.debug("apply_edit_to_selection: early return (no df or no range)")
             return
         
         cat_col = self.cat_col_combo.currentText()
@@ -907,6 +930,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 if __name__ == "__main__":
+    import matplotlib
+    log.info("=== CSV Visualizer starting ===")
+    log.info("matplotlib backend: %s", matplotlib.get_backend())
+    log.info("matplotlib version: %s", matplotlib.__version__)
+    log.info("Python: %s", sys.version)
+    log.info("Log file: %s", _log_path)
     app = QtWidgets.QApplication(sys.argv)
     w = MainWindow()
     w.show()
