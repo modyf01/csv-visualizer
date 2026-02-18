@@ -41,30 +41,20 @@ jobs:
             libxcb-xinerama0 libxkbcommon-x11-0 libegl1
 
       - name: Build executable
-        env:
-          MPLBACKEND: QtAgg
         run: |
-          COMMON_OPTS=(
-            --hidden-import matplotlib.backends.backend_qtagg
-            --hidden-import matplotlib.backends.backend_qt
-            --hidden-import matplotlib.backends.backend_agg
-            --hidden-import matplotlib.backends._backend_agg
-            --hidden-import PySide6.QtGui
-            --hidden-import PySide6.QtWidgets
-            --hidden-import PySide6.QtCore
-            --exclude-module tkinter
-            --exclude-module _tkinter
-          )
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.ico \
-              "${COMMON_OPTS[@]}" main.py
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.ico main.py
           elif [[ "${{ matrix.os }}" == macos-* ]]; then
             export MACOSX_DEPLOYMENT_TARGET=11.0
-            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.icns \
-              "${COMMON_OPTS[@]}" main.py
+            pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.icns main.py
           else
             pyinstaller --name csv-visualizer --onefile --windowed --icon packaging/icon.png \
-              "${COMMON_OPTS[@]}" main.py
+              --hidden-import matplotlib.backends.backend_qtagg \
+              --hidden-import matplotlib.backends.backend_agg \
+              --hidden-import PySide6.QtGui \
+              --hidden-import PySide6.QtWidgets \
+              --hidden-import PySide6.QtCore \
+              main.py
           fi
         shell: bash
 
