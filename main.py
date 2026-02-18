@@ -1,16 +1,11 @@
 import sys
 import math
 import logging
-import os
 import pandas as pd
 
-_log_path = os.path.join(os.path.expanduser("~"), "csv-visualizer-debug.log")
-logging.basicConfig(
-    filename=_log_path,
-    level=logging.DEBUG,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
 log = logging.getLogger("csvviz")
+log.addHandler(logging.NullHandler())
+log.setLevel(logging.CRITICAL)
 
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtGui import QAction, QShortcut
@@ -881,7 +876,14 @@ class MainWindow(QtWidgets.QMainWindow):
             old_vals = self.df.loc[start_idx:end_idx, cat_col].unique().tolist()
             log.debug("apply: old unique values in range: %s", old_vals)
 
-            self.df.loc[start_idx:end_idx, cat_col] = new_value
+            col_dtype = self.df[cat_col].dtype
+            try:
+                typed_value = col_dtype.type(new_value)
+            except (ValueError, TypeError):
+                typed_value = new_value
+            log.debug("apply: typed_value=%r (type=%s, col_dtype=%s)", typed_value, type(typed_value).__name__, col_dtype)
+
+            self.df.loc[start_idx:end_idx, cat_col] = typed_value
 
             verify = self.df.loc[start_idx:end_idx, cat_col].unique().tolist()
             log.debug("apply: after assignment, unique values in range: %s", verify)
@@ -956,12 +958,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 if __name__ == "__main__":
-    import matplotlib
-    log.info("=== CSV Visualizer starting ===")
-    log.info("matplotlib backend: %s", matplotlib.get_backend())
-    log.info("matplotlib version: %s", matplotlib.__version__)
-    log.info("Python: %s", sys.version)
-    log.info("Log file: %s", _log_path)
     app = QtWidgets.QApplication(sys.argv)
     w = MainWindow()
     w.show()
