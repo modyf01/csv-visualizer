@@ -128,19 +128,20 @@ class PlotCanvas(FigureCanvas):
         if event.guiEvent is not None:
             modifiers = event.guiEvent.modifiers()
             ctrl_pressed = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        zoom_in = event.button == "up"
+        self.zoom_axis("y" if ctrl_pressed else "x", zoom_in)
+
+    def zoom_axis(self, axis: str, zoom_in: bool):
         ax = self.ax
-        if ctrl_pressed:
-            cur_ylim = ax.get_ylim()
-            ydata = event.ydata if event.ydata is not None else (cur_ylim[0] + cur_ylim[1]) / 2
-            scale = 1.1 if event.button == "up" else 1 / 1.1
-            new_ylim = self._zoom_limits(cur_ylim, ydata, scale)
-            ax.set_ylim(new_ylim)
+        scale = 1.1 if zoom_in else 1 / 1.1
+        if axis == "y":
+            cur = ax.get_ylim()
+            center = (cur[0] + cur[1]) / 2
+            ax.set_ylim(self._zoom_limits(cur, center, scale))
         else:
-            cur_xlim = ax.get_xlim()
-            xdata = event.xdata if event.xdata is not None else (cur_xlim[0] + cur_xlim[1]) / 2
-            scale = 1.1 if event.button == "up" else 1 / 1.1
-            new_xlim = self._zoom_limits(cur_xlim, xdata, scale)
-            ax.set_xlim(new_xlim)
+            cur = ax.get_xlim()
+            center = (cur[0] + cur[1]) / 2
+            ax.set_xlim(self._zoom_limits(cur, center, scale))
         self.draw_idle()
 
     @staticmethod
@@ -444,6 +445,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage("Open a CSV → select columns → Plot.")
 
         QShortcut(Qt.Key_Escape, self, activated=self.toggle_compact_mode)
+
+        # Zoom X: + / -   Zoom Y: Ctrl+ / Ctrl-
+        for seq, axis, zoom_in in (
+            ("+", "x", True),
+            ("=", "x", True),
+            ("-", "x", False),
+            ("Ctrl++", "y", True),
+            ("Ctrl+=", "y", True),
+            ("Ctrl+-", "y", False),
+        ):
+            sc = QShortcut(QtGui.QKeySequence(seq), self)
+            sc.activated.connect(lambda a=axis, z=zoom_in: self._keyboard_zoom(a, z))
 
     def _apply_light_palette(self):
         pal = QtGui.QPalette()
@@ -935,6 +948,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_toggle_bg_legend(self, checked: bool):
         self._show_bg_legend = checked
         self.redraw_plot()
+
+    def _keyboard_zoom(self, axis: str, zoom_in: bool):
+        focused = QtWidgets.QApplication.focusWidget()
+        if isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit, QtWidgets.QSpinBox)):
+            return
+        if isinstance(focused, QtWidgets.QComboBox) and focused.isEditable() and focused.lineEdit().hasFocus():
+            return
+        self.canvas.zoom_axis(axis, zoom_in)
 
     def toggle_compact_mode(self):
         self._compact = not self._compact
