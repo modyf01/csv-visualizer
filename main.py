@@ -29,15 +29,25 @@ def generate_palette(n: int):
 
 
 class PlotCanvas(FigureCanvas):
-    def __init__(self, parent=None, toggle_compact_callback=None, selection_callback=None):
+    def __init__(
+        self,
+        parent=None,
+        toggle_compact_callback=None,
+        selection_callback=None,
+        point_pick_callback=None,
+    ):
         self.fig = Figure(figsize=(6, 4))
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
         self.toggle_compact_callback = toggle_compact_callback
         self.selection_callback = selection_callback
+        self.point_pick_callback = point_pick_callback
         self._press_event = None
         self._span_selector = None
+        self._point_pick_enabled = False
+        self._point_sel_line = None
+        self._range_select_enabled = False
         self.mpl_connect("scroll_event", self.on_scroll)
         self.mpl_connect("button_press_event", self.on_button_press)
         self.mpl_connect("button_release_event", self.on_button_release)
@@ -56,6 +66,7 @@ class PlotCanvas(FigureCanvas):
         show_series_legend=True,
     ):
         self.ax.clear()
+        self._point_sel_line = None
         x = df.index.values
 
         if cat_col is not None and cat_col in df.columns and bg_color_map:
@@ -151,12 +162,28 @@ class PlotCanvas(FigureCanvas):
         new_right = center + (right - center) / scale
         return new_left, new_right
 
+    def _shift_pressed(self, event) -> bool:
+        if event.guiEvent is None:
+            return False
+        return bool(event.guiEvent.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+
     def on_button_press(self, event):
         log.debug("on_button_press: button=%s, dblclick=%s, inaxes=%s, x=%s",
                   event.button, getattr(event, "dblclick", False), event.inaxes, event.xdata)
         if getattr(event, "dblclick", False) and callable(self.toggle_compact_callback):
             self.toggle_compact_callback()
             return
+
+        # Shift + right-click → pick a single marker point (not a range).
+        # Our press handler is registered before SpanSelector, so disable it first.
+        if event.button == 3 and self._point_pick_enabled and self._shift_pressed(event):
+            if self._span_selector is not None:
+                self._span_selector.set_active(False)
+            if event.xdata is not None and callable(self.point_pick_callback):
+                self.point_pick_callback(int(round(event.xdata)))
+            QtCore.QTimer.singleShot(0, self._reactivate_span_selector)
+            return
+
         if event.button in [1, 2]:
             self._press_event = event
 
@@ -180,6 +207,7 @@ class PlotCanvas(FigureCanvas):
 
     def enable_selection_mode(self, enabled: bool):
         log.debug("enable_selection_mode(%s), current selector=%s", enabled, self._span_selector)
+        self._range_select_enabled = enabled
         if enabled and self._span_selector is None:
             try:
                 self._span_selector = SpanSelector(
@@ -199,6 +227,15 @@ class PlotCanvas(FigureCanvas):
             self._span_selector.set_active(False)
             self._span_selector = None
             self.draw_idle()
+
+    def _reactivate_span_selector(self):
+        if self._range_select_enabled and self._span_selector is not None:
+            self._span_selector.set_active(True)
+
+    def enable_point_pick_mode(self, enabled: bool):
+        self._point_pick_enabled = enabled
+        if not enabled:
+            self.clear_point_selection()
 
     def _on_select(self, xmin, xmax):
         log.debug("_on_select called: xmin=%s, xmax=%s", xmin, xmax)
@@ -222,6 +259,22 @@ class PlotCanvas(FigureCanvas):
                 button=3
             )
             self.draw_idle()
+
+    def set_point_selection(self, idx: int | None):
+        if self._point_sel_line is not None:
+            try:
+                self._point_sel_line.remove()
+            except Exception:
+                pass
+            self._point_sel_line = None
+        if idx is not None:
+            self._point_sel_line = self.ax.axvline(
+                idx, color="#0984e3", linewidth=1.6, alpha=0.95, zorder=6
+            )
+        self.draw_idle()
+
+    def clear_point_selection(self):
+        self.set_point_selection(None)
 
 
 class PandasModel(QtCore.QAbstractTableModel):
@@ -376,6 +429,33 @@ class MainWindow(QtWidgets.QMainWindow):
         form_pts.addRow("Value:", self.point_value_combo)
         form_pts.addRow("", self.point_value_edit)
 
+        pts_separator = QtWidgets.QFrame()
+        pts_separator.setFrameShape(QtWidgets.QFrame.HLine)
+        pts_separator.setFrameShadow(QtWidgets.QFrame.Sunken)
+        form_pts.addRow("", pts_separator)
+
+        pts_edit_hint = QtWidgets.QLabel("Shift + right-click on plot to select a point")
+        pts_edit_hint.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+        pts_edit_hint.setWordWrap(True)
+        form_pts.addRow("", pts_edit_hint)
+
+        self.point_edit_value_combo = QtWidgets.QComboBox()
+        self.point_edit_value_combo.setEditable(True)
+        self.point_edit_value_combo.setPlaceholderText("Select or enter new value…")
+        self.point_edit_value_combo.setEnabled(False)
+        form_pts.addRow("Assign value:", self.point_edit_value_combo)
+
+        self.apply_point_edit_btn = QtWidgets.QPushButton("Apply to point")
+        self.apply_point_edit_btn.setEnabled(False)
+        self.apply_point_edit_btn.clicked.connect(self.apply_edit_to_point)
+        form_pts.addRow("", self.apply_point_edit_btn)
+
+        self.point_selection_label = QtWidgets.QLabel("No selection")
+        self.point_selection_label.setStyleSheet("color: #666; font-size: 11px;")
+        form_pts.addRow("", self.point_selection_label)
+
+        self.selected_point = None
+
         grp_seg = QtWidgets.QGroupBox("Segment")
         seg_layout = QtWidgets.QGridLayout(grp_seg)
         self.prev_seg_btn = QtWidgets.QPushButton("◀")
@@ -415,7 +495,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.table_view.setSortingEnabled(False)
         self.splitter.addWidget(self.table_view)
 
-        self.canvas = PlotCanvas(self, toggle_compact_callback=self.toggle_compact_mode, selection_callback=self.on_range_selected)
+        self.canvas = PlotCanvas(
+            self,
+            toggle_compact_callback=self.toggle_compact_mode,
+            selection_callback=self.on_range_selected,
+            point_pick_callback=self.on_point_selected,
+        )
         self.splitter.addWidget(self.canvas)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
@@ -698,6 +783,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_segment_label()
             self.redraw_plot()
             self._clear_selection()
+            self._clear_point_selection()
 
     def next_segment(self):
         if self.current_chunk < self.total_chunks - 1:
@@ -705,6 +791,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_segment_label()
             self.redraw_plot()
             self._clear_selection()
+            self._clear_point_selection()
 
     def on_segment_spin_changed(self, value: int):
         new_chunk = max(1, min(value, self.total_chunks)) - 1
@@ -713,6 +800,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_segment_label()
             self.redraw_plot()
             self._clear_selection()
+            self._clear_point_selection()
     
     def _clear_selection(self):
         self.selected_range = None
@@ -748,19 +836,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self.point_value_combo.addItem("— none —")
             self.point_value_combo.show()
             self.point_value_edit.hide()
-            return
-        uniqs = self.col_unique_cache.get(col_name)
-        if uniqs is None:
-            self.point_value_combo.hide()
-            self.point_value_edit.show()
-            self.point_value_edit.clear()
         else:
-            self.point_value_combo.clear()
-            self.point_value_combo.addItem("— none —")
-            for v in sorted(uniqs):
-                self.point_value_combo.addItem(v)
-            self.point_value_combo.show()
-            self.point_value_edit.hide()
+            uniqs = self.col_unique_cache.get(col_name)
+            if uniqs is None:
+                self.point_value_combo.hide()
+                self.point_value_edit.show()
+                self.point_value_edit.clear()
+            else:
+                self.point_value_combo.clear()
+                self.point_value_combo.addItem("— none —")
+                for v in sorted(uniqs):
+                    self.point_value_combo.addItem(v)
+                self.point_value_combo.show()
+                self.point_value_edit.hide()
+        self._update_point_edit_mode()
 
     def redraw_plot(self):
         if self.df is None or self.df.empty:
@@ -822,6 +911,7 @@ class MainWindow(QtWidgets.QMainWindow):
             show_bg_legend=self._show_bg_legend,
             show_series_legend=self._show_series_legend,
         )
+        self._restore_point_selection_visual()
         log.debug("redraw_plot: plot_data_with_background done")
 
     def _update_edit_mode(self):
@@ -840,6 +930,55 @@ class MainWindow(QtWidgets.QMainWindow):
             self.selection_label.setText("No selection")
             self.apply_edit_btn.setEnabled(False)
             self.edit_value_combo.setEnabled(False)
+
+    def _update_point_edit_mode(self):
+        point_col = self.point_col_combo.currentText()
+        has_point_col = (
+            point_col != "— none —"
+            and self.df is not None
+            and point_col in self.df.columns
+        )
+        self.canvas.enable_point_pick_mode(has_point_col)
+
+        if has_point_col:
+            uniqs = self.col_unique_cache.get(point_col)
+            current = self.point_edit_value_combo.currentText()
+            self.point_edit_value_combo.clear()
+            if uniqs is not None:
+                self.point_edit_value_combo.addItems(sorted(uniqs))
+                if current:
+                    idx = self.point_edit_value_combo.findText(current)
+                    if idx >= 0:
+                        self.point_edit_value_combo.setCurrentIndex(idx)
+            elif current:
+                self.point_edit_value_combo.setEditText(current)
+            if self.selected_point is not None:
+                self.point_edit_value_combo.setEnabled(True)
+                self.apply_point_edit_btn.setEnabled(True)
+        else:
+            self._clear_point_selection()
+            self.point_edit_value_combo.setEnabled(False)
+            self.apply_point_edit_btn.setEnabled(False)
+
+    def _clear_point_selection(self):
+        self.selected_point = None
+        self.point_selection_label.setText("No selection")
+        self.apply_point_edit_btn.setEnabled(False)
+        self.point_edit_value_combo.setEnabled(False)
+        self.canvas.clear_point_selection()
+
+    def _restore_point_selection_visual(self):
+        if self.selected_point is None:
+            return
+        if self.total_chunks == 1:
+            local_idx = self.selected_point
+        else:
+            chunk_offset = self.current_chunk * self.CHUNK_SIZE
+            chunk_end = chunk_offset + self.CHUNK_SIZE
+            if not (chunk_offset <= self.selected_point < chunk_end):
+                return
+            local_idx = self.selected_point - chunk_offset
+        self.canvas.set_point_selection(local_idx)
 
     def on_range_selected(self, start_idx: int, end_idx: int):
         log.debug("on_range_selected: start=%s, end=%s", start_idx, end_idx)
@@ -865,6 +1004,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_label.setText(f"Selected: rows {actual_start} to {actual_end} ({actual_end - actual_start + 1} rows)")
         self.apply_edit_btn.setEnabled(True)
         self.edit_value_combo.setEnabled(True)
+
+    def on_point_selected(self, local_idx: int):
+        if self.df is None:
+            return
+
+        df_slice = self._get_current_df_slice()
+        if local_idx < 0:
+            local_idx = 0
+        if local_idx >= len(df_slice):
+            local_idx = len(df_slice) - 1
+        if local_idx < 0:
+            return
+
+        if self.total_chunks == 1:
+            actual_idx = local_idx
+        else:
+            actual_idx = self.current_chunk * self.CHUNK_SIZE + local_idx
+
+        self.selected_point = actual_idx
+        self.point_selection_label.setText(f"Selected: row {actual_idx}")
+        self.apply_point_edit_btn.setEnabled(True)
+        self.point_edit_value_combo.setEnabled(True)
+        self.canvas.set_point_selection(local_idx)
 
     def apply_edit_to_selection(self):
         log.debug("apply_edit_to_selection: selected_range=%s, df=%s",
@@ -940,6 +1102,67 @@ class MainWindow(QtWidgets.QMainWindow):
             log.debug("apply: COMPLETE OK")
         except Exception:
             log.exception("apply_edit_to_selection CRASHED")
+
+    def apply_edit_to_point(self):
+        if self.df is None or self.selected_point is None:
+            return
+
+        try:
+            point_col = self.point_col_combo.currentText()
+            if point_col == "— none —" or point_col not in self.df.columns:
+                QtWidgets.QMessageBox.warning(self, "No Marker Column", "Please select a marker column first.")
+                return
+
+            new_value = self.point_edit_value_combo.currentText().strip()
+            if not new_value:
+                QtWidgets.QMessageBox.warning(self, "No Value", "Please enter or select a value to assign.")
+                return
+
+            idx = self.selected_point
+            col_dtype = self.df[point_col].dtype
+            try:
+                typed_value = col_dtype.type(new_value)
+            except (ValueError, TypeError):
+                typed_value = new_value
+
+            self.df.loc[idx, point_col] = typed_value
+            self._mark_as_modified()
+
+            uniqs = self._calc_unique_values_up_to_30(self.df[point_col])
+            self.col_unique_cache[point_col] = uniqs
+
+            # Refresh filter-value combo for markers
+            if uniqs is not None:
+                current_filter = self.point_value_combo.currentText()
+                self.point_value_combo.clear()
+                self.point_value_combo.addItem("— none —")
+                for v in sorted(uniqs):
+                    self.point_value_combo.addItem(v)
+                fidx = self.point_value_combo.findText(current_filter)
+                self.point_value_combo.setCurrentIndex(fidx if fidx >= 0 else 0)
+
+                current_assign = self.point_edit_value_combo.currentText()
+                self.point_edit_value_combo.clear()
+                self.point_edit_value_combo.addItems(sorted(uniqs))
+                aidx = self.point_edit_value_combo.findText(current_assign)
+                if aidx >= 0:
+                    self.point_edit_value_combo.setCurrentIndex(aidx)
+
+            model = PandasModel(self.df)
+            self.table_view.setModel(model)
+            self.table_view.resizeColumnsToContents()
+
+            xlim = self.canvas.ax.get_xlim()
+            ylim = self.canvas.ax.get_ylim()
+            self.redraw_plot()
+            self.canvas.ax.set_xlim(xlim)
+            self.canvas.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+
+            self._clear_point_selection()
+            self.statusBar().showMessage(f"Updated row {idx} with value '{new_value}'")
+        except Exception:
+            log.exception("apply_edit_to_point CRASHED")
 
     def _on_toggle_series_legend(self, checked: bool):
         self._show_series_legend = checked
